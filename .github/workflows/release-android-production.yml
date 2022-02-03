@@ -1,0 +1,55 @@
+name: Deploy android app to google playstore
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: User firebase app version 8.4.5
+        run: |
+          git grep app\":\ \"~8.2.0
+          ls package.json | xargs sed -i s/app\":\ \"~8.2.0/app\":\ \"~8.4.5/g
+      - name: Read .node-version
+        id: node_version
+        run: echo ::set-output name=NODE_VERSION::$(cat .node-version)
+      - name: Setup node
+        uses: actions/setup-node@v1
+        with:
+          node-version: ${{ steps.node_version.outputs.NODE_VERSION }}
+      - name: Cache node_modules
+        uses: actions/cache@v1
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      - name: yarn install
+        run: yarn install --check-files
+      - name: Create .env file
+        run: echo "${{ secrets.DOT_ENV_PROD }}" > .env
+      - name: Setup ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+      - name: Keystore
+        run: |
+          echo "${{ secrets.KEY_STORE_PROD }}" | base64 --decode > KEY_STORE_NAME.keystore
+          echo "${{ secrets.KEY_STORE_PROD }}" | base64 --decode > android/app/KEY_STORE_NAME.keystore
+      - name: Key json
+        run: |
+          echo "${{ secrets.PLAYSTORE_UPLOAD_KEY }}" | base64 --decode > android/app/key.json
+      - name: NPX jetify
+        run: npx jetify
+      - name: Set GoogleService.json
+        run: |
+          mkdir -p android/app/src/release
+          echo "${{ secrets.GSERVICE_ANDROID_PROD }}" | base64 --decode > android/app/src/release/google-services.json
+      - name: Deploy Android app to playstore alpha release
+        run: bundle exec fastlane android deploy_alpha

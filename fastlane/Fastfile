@@ -1,0 +1,204 @@
+ENV["FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT"] = "300"
+ENV["FASTLANE_XCODE_LIST_TIMEOUT"] = "300"
+default_platform(:ios)
+
+## Readme
+platform :ios do
+  desc 'just regenerate fastlane/README.md'
+  lane :readme do
+  end
+
+  ## Versioning
+  desc 'Bump up build number - to the next highest integer value'
+  lane :bumpup_build_number do
+    increment_build_number(
+      xcodeproj: "./ios/demo.xcodeproj" # <----UPDATE PROJECT DIR HERE
+    )
+    commit_version_bump(
+      message: "Version Bump",
+      xcodeproj: "./ios/demo.xcodeproj" # <----UPDATE PROJECT DIR HERE
+    )
+  end
+
+  desc 'Bump up patch version'
+  lane :bumpup_patch do
+    increment_build_number
+    increment_version_number bump_type: 'patch'
+  end
+
+  desc 'Bump up minor version'
+  lane :bumpup_minor do
+    increment_build_number
+    increment_version_number bump_type: 'minor'
+  end
+
+   desc 'Bump up major version'
+  lane :bumpup_major do
+    increment_build_number
+    increment_version_number bump_type: 'major'
+  end
+
+  desc 'Set the build number to a specific version'
+  desc 'ex: fastlane ios set_build_number build_number:1.0'
+  lane :set_build_number do |options|
+    increment_build_number build_number:options[:build_number]
+  end
+
+  desc 'Set the version number to a specific version'
+  desc 'ex: fastlane ios set_version_number version_number:1.5.0'
+  lane :set_version_number do |options|
+    increment_version_number version_number:options[:version_number]
+  end
+
+  desc "Import Certificates and Provisioning Profile"
+  private_lane :import_certificates_and_provisioning_profile do
+    create_keychain(
+      name: "mykeychain",
+      password: "password",
+      timeout: 1000
+    )
+    import_certificate(
+      certificate_path: "ios_distribution.p12", # <----UPDATE .p12 fi FILENAME THAT WE GENERATED EARLIER
+      certificate_password: ENV["P12_PASSWORD"], # CREATE P12_PASSWORD IN .env FILE
+      keychain_name: "mykeychain",
+      keychain_password: "password" # YOUR KEY CHAIN PASSWORD
+    )
+    install_provisioning_profile(path: "demo.mobileprovision") # <----UPDATE PROVISION NAME
+  end
+
+  ## Building
+  desc 'build Staging ipa file'
+  lane :build_staging_ipa do
+    build_app(
+       clean: true,
+       verbose: true,
+       scheme: 'demo-staging', # <----UPDATE THE SCHEME THAT YOU WANT TO USE FOR STAGING
+       configuration: "Staging", # <----UPDATE CONFIGURATION THAT YOU WANT TO USE FOR STAGING
+       workspace: 'ios/demo.xcworkspace', # <----UPDATE PROJECT DIR HERE
+       output_directory: "./fastlane/build/staging",
+       export_xcargs: "-allowProvisioningUpdates"
+    )
+  end
+
+  desc 'build Production ipa file'
+  lane :build_production_ipa do
+    # cocoapods(
+    #   podfile: "./ios/Podfile"
+    # )
+    build_app(
+      clean: true,
+      verbose: true,
+      scheme: 'demo-release', # <----UPDATE THE SCHEME THAT YOU WANT TO USE FOR PRODUCTION
+      configuration: "Release", # <----UPDATE CONFIGURATION THAT YOU WANT TO USE FOR PRODUCTION
+      workspace: 'ios/demo.xcworkspace', # <----UPDATE PROJECT DIR HERE
+      output_directory: "./fastlane/build/production",
+      export_xcargs: "-allowProvisioningUpdates"
+    )
+  end
+
+  desc 'upload archives to testflight'
+  lane :'deploy_to_testflight' do 
+    import_certificates_and_provisioning_profile
+    build_production_ipa
+    upload_to_testflight(
+      skip_waiting_for_build_processing: true,
+      skip_submission: true,
+      apple_id: "1558072295", # <---- YOUR APP APPLEID FROM ITUNES CONNECT
+      ipa: "./fastlane/build/production/demo.ipa" # <----MAKE SURE THE FILE NAME IS SAME
+    )
+  end
+end
+
+platform :android do
+  ## Readme
+  desc "just regenerate fastlane/README.md"
+  lane :readme do
+  end
+
+  desc 'Bump up version code - to the next highest integer value'
+  lane :bumpup_version_code do 
+    increment_version_code(
+      gradle_file_path: "./android/app/build.gradle"
+    )
+    git_commit( 
+      path: "./android/app/build.gradle",
+      message: "Android version bump Fastlane"
+    )
+  end
+
+  desc 'build production apk file'
+  lane :build_production_apk do
+    gradle(
+      project_dir: "./android",
+      task: "clean",
+      task: "assemble",
+      build_type: "Release",
+      properties: {
+        "android.injected.signing.store.file" => ENV["KEYSTORE_FILE"],
+        "android.injected.signing.store.password" => ENV["KEYSTORE_PASSWORD"],
+        "android.injected.signing.key.alias" => ENV["KEY_ALIAS"],
+        "android.injected.signing.key.password" => ENV["KEY_PASSWORD"],
+      }
+    )
+  end  
+
+  desc 'build staging apk file'
+  lane :build_staging_apk do
+    gradle(
+      project_dir: "./android",
+      task: "clean",
+      task: "assemble",
+      build_type: "releaseStaging",
+      properties: {
+        "android.injected.signing.store.file" => ENV["KEYSTORE_FILE"],
+        "android.injected.signing.store.password" => ENV["KEYSTORE_PASSWORD"],
+        "android.injected.signing.key.alias" => ENV["KEY_ALIAS"],
+        "android.injected.signing.key.password" => ENV["KEY_PASSWORD"],
+      }
+    )
+  end
+
+  desc "Upload app to Deploygate"
+  lane :deploy_to_deploygate do
+    build_staging_apk
+    deploygate(
+      api_token: ENV["DEPLOYGATE_API"],
+      user: "Namespace-inc",
+      apk: "./android/app/build/outputs/apk/releaseStaging/app-releaseStaging.apk",
+      message: "Build #{lane_context[SharedValues::BUILD_NUMBER]}",
+    )
+  end
+
+  desc "Upload app to PlayStore for Beta"
+  lane :deploy_beta do
+    build_production_apk
+    upload_to_play_store(
+      track: "beta",
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  desc "Upload app to PlayStore for Alpha"
+  lane :deploy_alpha do
+    build_production_apk
+    upload_to_play_store(
+      track: "alpha",
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  desc "Upload app to PlayStore for Internal test"
+  lane :deploy_internal do
+    build_production_apk
+    upload_to_play_store(
+      track: "internal",
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+  end
+
+  error do |lane, exception| 
+  end
+end

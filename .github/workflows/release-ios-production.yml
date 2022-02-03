@@ -1,0 +1,92 @@
+name: Publish iOS APP
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy
+    runs-on: macos-latest
+    steps:
+      - run: echo "::set-output name=NODE_VERSION::$(cat .node-version)"
+        id: nodenv
+
+      - uses: actions/checkout@v2
+      - name: Use Node.js ${{ steps.nodenv.outputs.NODE_VERSION }}
+        uses: actions/setup-node@v1
+        with:
+          node-version: ${{ steps.nodenv.outputs.NODE_VERSION }}
+
+      - name: Cache node_modules
+        uses: actions/cache@v1
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: yarn install
+        run: yarn install --check-files
+
+      - name: Create .env file
+        run: echo "${{ secrets.DOT_ENV_PROD }}" > .env
+
+      - run: echo "::set-output name=RUBY_VERSION::$(cat .ruby-version)"
+        id: rbenv
+
+      - name: Use Ruby ${{ steps.rbenv.outputs.RUBY_VERSION }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ steps.rbenv.outputs.RUBY_VERSION }}
+
+      - name: Cache gems
+        uses: actions/cache@v1
+        with:
+          path: vendor/bundle
+          key: ${{ runner.os }}-gem-${{ hashFiles('**/Gemfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-gem-
+
+      - name: bundle install
+        run: |
+          gem install bundler
+          bundle install --jobs 4 --retry 3 --path vendor/bundle
+
+      - name: Cache Podfile
+        uses: actions/cache@v1
+        with:
+          path: ios/Pods
+          key: ${{ runner.os }}-pods-${{ hashFiles('**/Podfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-
+
+      - name: pod install
+        run: cd ios && pod install
+
+      - name: Keychain.p12
+        run: |
+          echo "${{ secrets.P12_PROD }}" | base64 --decode > ios_distribution.p12
+      - name: Set GoogleService-Info.plist
+        run: |
+          mkdir -p ios/PROJECT_NAME/Firebase/Production
+          echo "${{ secrets.PLIST_PROD }}" | base64 --decode > ios/PROJECT_NAME/Firebase/Production/GoogleService-Info.plist
+        # UPDATE PROJECT_NAME
+      - name: Set node path
+        run: echo "export NODE_BINARY=/Users/runner/hostedtoolcache/node/14.0.0/x64/bin/node"
+
+      - name: Echo Xcode version
+        run: echo "::set-output name=XCODE_VERSION::$(/usr/bin/xcodebuild -version | sed -En 's/Xcode[[:space:]]+([0-9\.]*)/\1/p')"
+        id: xcode_version
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s '/Applications/Xcode_${{ steps.xcode_version.outputs.XCODE_VERSION }}.app'
+
+      - name: ProvisioningProfile
+        run: |
+          echo "${{ secrets.PROVISION_PROD }}" | base64 --decode > demo.mobileprovision
+        ## MAKE SURE TO UPDATE name of the provision file that we are decoding to
+      - name: Deploy iOS app to deploygate
+        run: bundle exec fastlane ios deploy_to_testflight

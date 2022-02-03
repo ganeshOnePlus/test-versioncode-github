@@ -1,0 +1,5 @@
+## iOS
+app_identifier "com.namespace.template" # The bundle identifier of your app
+apple_id "appleid@namespace.jp" # Your Apple email address
+team_id "A23SVT9968"
+itc_team_id "119007509"
