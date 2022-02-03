@@ -1,4 +1,4 @@
-name: Deploy android app to deploygate with fastlane
+name: Bump version code using github action
 
 on:
   push:
@@ -8,9 +8,10 @@ on:
   
 jobs:
   build-and-deploy:
-    name: Build and deploy android build on staging.
+    name: Bump version code
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v2
       - name: set up JDK 1.8
         uses: actions/setup-java@v1
         with:
@@ -18,5 +19,5 @@ jobs:
       - name: Bump version
         uses: chkfung/android-version-actions@v1.1
         with:
-          gradlePath: ${{ github.workspace }}/app/build.gradle
+          gradlePath: android/app/build.gradle
           versionCode: ${{github.run_number}}
